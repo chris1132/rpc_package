@@ -23,8 +23,9 @@ public class RpcClient {
         this.serverAddress = serverAddress;
     }
 
-    public RpcClient(ServiceDiscovery serviceDiscovery) {
+    public RpcClient(ServiceDiscovery serviceDiscovery,String serverAddress) {
         this.serviceDiscovery = serviceDiscovery;
+        this.serverAddress = serverAddress;
     }
 
     @SuppressWarnings("unchecked")

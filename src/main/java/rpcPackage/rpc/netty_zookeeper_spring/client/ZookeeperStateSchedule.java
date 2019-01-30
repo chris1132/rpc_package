@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
  * Created by wangchaohui on 2018/3/20.
  */
 @Component
+@Deprecated
 public class ZookeeperStateSchedule {
 
     @Scheduled(cron = "15 * * * * ?")

@@ -51,6 +51,9 @@ public class RpcServer implements InitializingBean {
     }
 
 
+    /**
+     * 实现了InitializingBean，在Bean初始化的时候，调用afterPropertiesSet
+     * */
     @Override
     public void afterPropertiesSet() throws Exception {
         start();
@@ -75,17 +78,6 @@ public class RpcServer implements InitializingBean {
             }
         }
         threadPoolExecutor.submit(task);
-    }
-
-    /**
-     * addservice手动给handlerMap添加实现方法，测试用
-     */
-    public RpcServer addService(String interfaceName, Object serviceBean) {
-        if (!handlerMap.containsKey(interfaceName)) {
-            logger.info("Loading service: {}", interfaceName);
-            handlerMap.put(interfaceName, serviceBean);
-        }
-        return this;
     }
 
     /**
@@ -121,9 +113,11 @@ public class RpcServer implements InitializingBean {
             ChannelFuture future = bootstrap.bind(host, port).sync();
             logger.info("Server started on port {}", port);
             System.out.println("++++++++++++++++++++++TCP服务器已启动++++++++++++++++++++++");
+
             //服务端使用zookeeper注册服务地址
-            if (serviceRegistry != null) {
-                serviceRegistry.register(serverAddress);
+            logger.info("绑定服务提供者地址和端口成功，准备向zookeeper注册服务...");
+            for (String interfaceName : handlerMap.keySet()) {
+                serviceRegistry.registerService(serverAddress, interfaceName);
             }
             future.channel().closeFuture().sync();
         }

@@ -3,10 +3,14 @@ package rpcPackage.rpc.netty_zookeeper_spring.registry;
 /**
  * Created by wangchaohui on 2018/3/16.
  */
-public interface Constant {
+public class Constant {
 
-    int ZK_SESSION_TIMEOUT = 5000;
+    // 连接zookeeper的超时时间
+    static int ZK_SESSION_TIMEOUT = 5000;
 
-    String ZK_REGISTRY_PATH = "/registry";
-    String ZK_DATA_PATH = ZK_REGISTRY_PATH + "/data";
+    //zookeeper中保存服务消息的父节点
+    static final String PARENT_NODE = "/36_rpc";
+
+    // zookeeper中服务提供者的序列化名称
+    static final String SERVER_NAME= "/server";
 }

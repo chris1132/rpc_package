@@ -25,21 +25,39 @@ public class ServiceDiscovery {
     private volatile List<String> dataList = new ArrayList<>();
 
     private String registryAddress;
-    private ZooKeeper zookeeper = null;
+    private ZooKeeper zkClient = null;
 
     public ServiceDiscovery(String registryAddress) {
         this.registryAddress = registryAddress;
-        zookeeper = connectServer();
-        if (zookeeper != null) {
-            //查询服务地址，更新
-            watchNode(zookeeper);
-        }
+//        zookeeper = connectServer();
+//        if (zookeeper != null) {
+//            //查询服务地址，更新
+//            watchNode(zookeeper);
+//        }
     }
 
-    private ZooKeeper connectServer() {
-        ZooKeeper zp = null;
+    /**
+     * 发现服务方法 根据接口名称向zookeeper查询服务提供者的地址
+     */
+    public String discoverService(String interfaceName) {
+        if (this.zkClient == null) {
+            logger.info("未连接zookeeper，准备建立连接...");
+            connectServer();
+        }
+        //构建需要查询的节点的完整名称
+        String node = Constant.PARENT_NODE + "/" + interfaceName;
+        //获取该节点所对应的服务提供者地址
+        logger.info("zookeeper连接建立完毕，准备获取服务提供者地址[{}]...", node);
+        String serverAddress = watchNode(node);
+        logger.info("服务提供者地址获取完毕[{}]...", serverAddress);
+        // 返回结果
+        return serverAddress;
+
+    }
+
+    private void connectServer() {
         try {
-            zp = new ZooKeeper(registryAddress, Constant.ZK_SESSION_TIMEOUT, new Watcher() {
+            zkClient = new ZooKeeper(registryAddress, Constant.ZK_SESSION_TIMEOUT, new Watcher() {
                 @Override
                 public void process(WatchedEvent event) {
                     if (event.getState() == Event.KeeperState.SyncConnected) {
@@ -51,32 +69,35 @@ public class ServiceDiscovery {
         } catch (IOException | InterruptedException e) {
             logger.error("", e);
         }
-        return zp;
     }
 
-    private void watchNode(final ZooKeeper zk) {
+    private String watchNode(String node) {
+        String serverAddress = null;
         try {
-            List<String> nodeList = zk.getChildren(Constant.ZK_REGISTRY_PATH, new Watcher() {
+            List<String> nodeList = zkClient.getChildren(node, new Watcher() {
                 @Override
                 public void process(WatchedEvent event) {
                     if (event.getType() == Event.EventType.NodeChildrenChanged) {
-                        watchNode(zk);
+                        watchNode(node);
                     }
                 }
             });
-            List<String> dataList = new ArrayList<>();
-            for (String node : nodeList) {
-                byte[] bytes = zk.getData(Constant.ZK_REGISTRY_PATH + "/" + node, false, null);
-                dataList.add(new String(bytes));
-            }
-            logger.debug("node data: {}", dataList);
-            this.dataList = dataList;
+            // 负载均衡：一致性hash算法
+            ConsistentHash.initServers(nodeList);
+            String firstChildren = ConsistentHash.getServer("children");
+            // 构建该服务提供者的完整节点名称
+            String firstChildrenNode = node + "/" + firstChildren;
+            // 获取服务提供者节点的数据，得到serverAddress的byte数组
+            byte[] serverAddressByte = zkClient.getData(firstChildrenNode, false, null);
+            // 将byte数组转换为字符串，同时赋值给serverAddress
+            serverAddress = new String(serverAddressByte);
 
             logger.debug("更新服务节点.");
             UpdateConnectedServer();
         } catch (KeeperException | InterruptedException e) {
             logger.error("", e);
         }
+        return serverAddress;
     }
 
     private void UpdateConnectedServer() {
@@ -84,9 +105,9 @@ public class ServiceDiscovery {
     }
 
     public void stop() {
-        if (zookeeper != null) {
+        if (zkClient != null) {
             try {
-                zookeeper.close();
+                zkClient.close();
             } catch (InterruptedException e) {
                 logger.error("", e);
             }
