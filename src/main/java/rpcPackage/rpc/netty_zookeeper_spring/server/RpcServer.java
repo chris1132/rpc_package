@@ -8,11 +8,10 @@ import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
-import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.InitializingBean;
-import rpcPackage.rpc.netty_zookeeper_spring.registry.ServiceRegistry;
+import org.springframework.stereotype.Component;
 import rpcPackage.rpc.netty_zookeeper_spring.util.RpcDecoder;
 import rpcPackage.rpc.netty_zookeeper_spring.util.RpcEncoder;
 import rpcPackage.rpc.netty_zookeeper_spring.util.RpcRequest;
@@ -20,30 +19,28 @@ import rpcPackage.rpc.netty_zookeeper_spring.util.RpcResponse;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
 /**
- * Created by wangchaohui on 2018/3/16.
+ * Created by wangchaohui on 2019/1/30.
+ *
  */
-public class RpcServer implements InitializingBean {
 
-    private static final Logger logger = LoggerFactory.getLogger(RpcServer.class);
+/**
+ * RPCServer主要完成下面的几个功能
+ * 1、将需要发布的服务保存到一个map中
+ * 2、启动netty服务端程序
+ * 3、向zookeeper注册需要发布的服务
+ */
+@Component
+public class RpcServer implements InitializingBean {
+    //用来保存用户服务实现类对象，key为实现类的接口名称，value为实现类对象
+    public Map<String, Object> handlerMap = new HashMap<>();
 
     private String serverAddress;
+
     private ServiceRegistry serviceRegistry;
 
-    public Map<String, Object> handlerMap = new HashMap<String, Object>();
-
-    private static ThreadPoolExecutor threadPoolExecutor;
-
-    private EventLoopGroup bossGroup = null;
-    private EventLoopGroup workerGroup = null;
-
-    public RpcServer(String serverAddress) {
-        this.serverAddress = serverAddress;
-    }
+    private Logger logger = LoggerFactory.getLogger(RpcServer.class);
 
     public RpcServer(String serverAddress, ServiceRegistry serviceRegistry) {
         this.serverAddress = serverAddress;
@@ -52,74 +49,55 @@ public class RpcServer implements InitializingBean {
 
 
     /**
-     * 实现了InitializingBean，在Bean初始化的时候，调用afterPropertiesSet
-     * */
+     * 由于本类实现了InitializingBean接口，spring在构造完所有对象之后会调用afterPropertiesSet方法
+     * 在该方法中，将服务注册到zookeeper，同时启动netty服务端程序，该方法中主要是netty框架的代码
+     *
+     * @throws Exception
+     */
     @Override
     public void afterPropertiesSet() throws Exception {
-        start();
-    }
 
-    public void stop() {
-        if (bossGroup != null) {
-            bossGroup.shutdownGracefully();
-        }
-        if (workerGroup != null) {
-            workerGroup.shutdownGracefully();
-        }
-    }
+        logger.info("准备构建RPC服务端，监听来自RPC客户端的请求...");
+        // 配置服务端NIO线程组
+        EventLoopGroup bossGroup = new NioEventLoopGroup();
+        EventLoopGroup workerGroup = new NioEventLoopGroup();
 
-    public static void submit(Runnable task) {
-        if (threadPoolExecutor == null) {
-            synchronized (RpcServer.class) {
-                if (threadPoolExecutor == null) {
-                    threadPoolExecutor = new ThreadPoolExecutor(16, 16, 600L,
-                            TimeUnit.SECONDS, new ArrayBlockingQueue<Runnable>(65536));
-                }
-            }
-        }
-        threadPoolExecutor.submit(task);
-    }
-
-    /**
-     * LengthFieldBasedFrameDecoder
-     * 1) lengthFieldOffset = 0；//长度字段的偏差
-     * 2) lengthFieldLength = 2；//长度字段占的字节数
-     * 3) lengthAdjustment = 0；//添加到长度字段的补偿值
-     * 4) initialBytesToStrip = 0。//从解码帧中第一次去除的字节数
-     */
-    public void start() throws Exception {
-        if (bossGroup == null && workerGroup == null) {
-            bossGroup = new NioEventLoopGroup();
-            workerGroup = new NioEventLoopGroup();
-            ServerBootstrap bootstrap = new ServerBootstrap();
-            bootstrap.group(bossGroup, workerGroup).channel(NioServerSocketChannel.class)
+        try {
+            ServerBootstrap b = new ServerBootstrap();
+            b.group(bossGroup, workerGroup).channel(NioServerSocketChannel.class).option(ChannelOption.SO_BACKLOG, 1024)
                     .childHandler(new ChannelInitializer<SocketChannel>() {
+
                         @Override
-                        public void initChannel(SocketChannel channel) throws Exception {
-                            channel.pipeline()
-                                    .addLast(new LengthFieldBasedFrameDecoder(65536, 0, 4, 0, 0))//tcp粘包处理，消息解码时，开始4个字节是消息长度
-                                    .addLast(new RpcDecoder(RpcRequest.class))
-                                    .addLast(new RpcEncoder(RpcResponse.class))
-                                    .addLast(new RpcHandler(handlerMap));
+                        protected void initChannel(SocketChannel sc) throws Exception {
+                            //添加编码器，Rpc服务端需要解码的是RpcRequest对象，因为需要接收客户端发送过来的请求
+                            sc.pipeline().addLast(new RpcDecoder(RpcRequest.class));
+                            //添加解码器
+                            sc.pipeline().addLast(new RpcEncoder(RpcResponse.class));
+                            //添加业务处理handler
+                            sc.pipeline().addLast(new RpcHandler(handlerMap));
                         }
-                    })
-                    .option(ChannelOption.SO_BACKLOG, 128)
-                    .childOption(ChannelOption.SO_KEEPALIVE, true);
+                    });
 
             String[] array = serverAddress.split(":");
             String host = array[0];
-            int port = Integer.parseInt(array[1]);
+            int port = Integer.valueOf(array[1]);
 
-            ChannelFuture future = bootstrap.bind(host, port).sync();
-            logger.info("Server started on port {}", port);
-            System.out.println("++++++++++++++++++++++TCP服务器已启动++++++++++++++++++++++");
+            // 绑定端口，同步等待成功，该方法是同步阻塞的，绑定成功后返回一个ChannelFuture
+            logger.info("准备绑定服务提供者地址和端口[{}:{}]", host, port);
+            ChannelFuture f = b.bind(host, port).sync();
 
-            //服务端使用zookeeper注册服务地址
+            // 向zookeeper注册
             logger.info("绑定服务提供者地址和端口成功，准备向zookeeper注册服务...");
             for (String interfaceName : handlerMap.keySet()) {
                 serviceRegistry.registerService(serverAddress, interfaceName);
             }
-            future.channel().closeFuture().sync();
+            // 等待服务端监听端口关闭，阻塞，等待服务端链路关闭之后main函数才退出
+            logger.info("向zookeeper注册服务成功，正在监听来自RPC客户端的请求连接...");
+            f.channel().closeFuture().sync();
+        } finally {
+            //优雅退出，释放线程池资源
+            bossGroup.shutdownGracefully();
+            workerGroup.shutdownGracefully();
         }
     }
 

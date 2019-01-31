@@ -14,7 +14,7 @@ import rpcPackage.rpc.netty_zookeeper_spring.util.RpcResponse;
 import java.util.Map;
 
 /**
- * Created by wangchaohui on 2018/3/16.
+ * Created by wangchaohui on 2019/1/30.
  */
 public class RpcHandler extends SimpleChannelInboundHandler<RpcRequest> {
 
@@ -28,30 +28,25 @@ public class RpcHandler extends SimpleChannelInboundHandler<RpcRequest> {
 
     @Override
     public void channelRead0(final ChannelHandlerContext ctx, final RpcRequest request) throws Exception {
-        RpcServer.submit(new Runnable() {
+        logger.debug("Receive request " + request.getRequestId());
+        RpcResponse response = new RpcResponse();
+        response.setRequestId(request.getRequestId());
+        try {
+            //处理具体业务逻辑，利用反射，根据接口请求的方法参数，处理逻辑
+            Object result = handle(request);
+            System.out.println("Receive from client~~~~~~~~~~~~~~~~~:" + result.toString());
+            response.setResult(result);
+        } catch (Throwable e) {
+            response.setError(e);
+            logger.error("RPC Server handle request error", e);
+        }
+        ctx.writeAndFlush(response).addListener(new ChannelFutureListener() {
             @Override
-            public void run() {
-                logger.debug("Receive request " + request.getRequestId());
-                RpcResponse response = new RpcResponse();
-                response.setRequestId(request.getRequestId());
-                try {
-                    //处理具体业务逻辑，利用反射，根据接口请求的方法参数，处理逻辑
-                    Object result = handle(request);
-                    System.out.println("Receive from client~~~~~~~~~~~~~~~~~:" + result.toString());
-                    response.setResult(result);
-                    response.setCode(100);
-                } catch (Throwable t) {
-                    response.setError(t.toString());
-                    logger.error("RPC Server handle request error", t);
-                }
-                ctx.writeAndFlush(response).addListener(new ChannelFutureListener() {
-                    @Override
-                    public void operationComplete(ChannelFuture channelFuture) throws Exception {
-                        logger.debug("Send response for request " + request.getRequestId());
-                    }
-                });
+            public void operationComplete(ChannelFuture channelFuture) throws Exception {
+                logger.debug("Send response for request " + request.getRequestId());
             }
         });
+
     }
 
     /**

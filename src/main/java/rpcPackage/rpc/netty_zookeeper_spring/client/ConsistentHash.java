@@ -1,4 +1,4 @@
-package rpcPackage.rpc.netty_zookeeper_spring.registry;
+package rpcPackage.rpc.netty_zookeeper_spring.client;
 
 import java.util.List;
 import java.util.SortedMap;
@@ -8,7 +8,6 @@ import java.util.TreeMap;
  * Created by wangchaohui on 2019/1/30
  */
 public class ConsistentHash {
-
 
     //key表示服务器的hash值，value表示服务器
     private static SortedMap<Integer, String> sortedMap = new TreeMap<Integer, String>();
@@ -55,12 +54,5 @@ public class ConsistentHash {
         if (hash < 0)
             hash = Math.abs(hash);
         return hash;
-    }
-
-    public static void main(String[] args) {
-        String[] keys = {"sddsds", "dsdd", "dfdf"};
-        for(int i=0; i<keys.length; i++)
-            System.out.println("[" + keys[i] + "]的hash值为" + getHash(keys[i])
-                    + ", 被路由到结点[" + getServer(keys[i]) + "]");
     }
 }
